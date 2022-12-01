@@ -57,8 +57,3 @@ fn test() {
     assert_eq!(Day01::run(input), (24000, 45000));
 }
 
-#[test]
-fn run() {
-    let input = std::fs::read_to_string("inputs/day_01.txt").unwrap();
-    println!("{:?}", Day01::run(&input));
-}
