@@ -73,8 +73,26 @@ impl From<UnknownInput> for Choice {
         }
     }
 }
+impl From<&UnknownInput> for Choice {
+    fn from(c: &UnknownInput) -> Self {
+        match c {
+            UnknownInput::X => Self::Rock,
+            UnknownInput::Y => Self::Paper,
+            UnknownInput::Z => Self::Scissors,
+        }
+    }
+}
 impl From<UnknownInput> for Outcome {
     fn from(c: UnknownInput) -> Self {
+        match c {
+            UnknownInput::X => Self::Loss,
+            UnknownInput::Y => Self::Draw,
+            UnknownInput::Z => Self::Win,
+        }
+    }
+}
+impl From<&UnknownInput> for Outcome {
+    fn from(c: &UnknownInput) -> Self {
         match c {
             UnknownInput::X => Self::Loss,
             UnknownInput::Y => Self::Draw,
@@ -90,39 +108,50 @@ impl Day for Day02 {
 
     type Output = u32;
 
-    fn part_1(input: Self::Input) -> Self::Output {
+    fn part_1(input: &Self::Input) -> Self::Output {
         input
-            .into_iter()
-            .map(|game| (game.0, Choice::from(game.1)))
+            .iter()
+            .map(|game| (&game.0, Choice::from(&game.1)))
             .fold(0, |score, game| {
-                score + game.1.score() + game.1.outcome(&game.0).score()
+                score + game.1.score() + game.1.outcome(game.0).score()
             })
     }
 
-    fn part_2(input: Self::Input) -> Self::Output {
-        let solutions = {
-            let mut solutions = HashMap::new();
-
-            solutions.insert((Choice::Rock, Outcome::Win), Choice::Paper);
-            solutions.insert((Choice::Rock, Outcome::Draw), Choice::Rock);
-            solutions.insert((Choice::Rock, Outcome::Loss), Choice::Scissors);
-
-            solutions.insert((Choice::Paper, Outcome::Win), Choice::Scissors);
-            solutions.insert((Choice::Paper, Outcome::Draw), Choice::Paper);
-            solutions.insert((Choice::Paper, Outcome::Loss), Choice::Rock);
-
-            solutions.insert((Choice::Scissors, Outcome::Win), Choice::Rock);
-            solutions.insert((Choice::Scissors, Outcome::Draw), Choice::Scissors);
-            solutions.insert((Choice::Scissors, Outcome::Loss), Choice::Paper);
-
-            solutions
-        };
+    fn part_2(input: &Self::Input) -> Self::Output {
+        // let solutions = {
+        //     let mut solutions = HashMap::new();
+        //
+        //     solutions.insert((Choice::Rock, Outcome::Win), Choice::Paper);
+        //     solutions.insert((Choice::Rock, Outcome::Draw), Choice::Rock);
+        //     solutions.insert((Choice::Rock, Outcome::Loss), Choice::Scissors);
+        //
+        //     solutions.insert((Choice::Paper, Outcome::Win), Choice::Scissors);
+        //     solutions.insert((Choice::Paper, Outcome::Draw), Choice::Paper);
+        //     solutions.insert((Choice::Paper, Outcome::Loss), Choice::Rock);
+        //
+        //     solutions.insert((Choice::Scissors, Outcome::Win), Choice::Rock);
+        //     solutions.insert((Choice::Scissors, Outcome::Draw), Choice::Scissors);
+        //     solutions.insert((Choice::Scissors, Outcome::Loss), Choice::Paper);
+        //
+        //     solutions
+        // };
 
         input
-            .into_iter()
-            .map(|game| (game.0, Outcome::from(game.1)))
+            .iter()
+            .map(|game| (game.0.clone(), Outcome::from(&game.1)))
             .fold(0, |score, game| {
-                score + game.1.score() + solutions.get(&game).unwrap().score()
+                let outcome = match (&game.0, &game.1) {
+                    (_, Outcome::Draw) => game.0.clone(),
+                    (Choice::Rock, Outcome::Win) => Choice::Paper,
+                    (Choice::Rock, Outcome::Loss) => Choice::Scissors,
+                    (Choice::Paper, Outcome::Win) => Choice::Scissors,
+                    (Choice::Paper, Outcome::Loss) => Choice::Rock,
+                    (Choice::Scissors, Outcome::Win) => Choice::Rock,
+                    (Choice::Scissors, Outcome::Loss) => Choice::Paper,
+                };
+                //let outcome = solutions.get(&game).unwrap();
+
+                score + game.1.score() + outcome.score()
             })
     }
 

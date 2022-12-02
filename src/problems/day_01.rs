@@ -12,11 +12,11 @@ impl Day for Day01 {
     type Input = Input;
     type Output = usize;
 
-    fn part_1(input: Self::Input) -> Self::Output {
+    fn part_1(input: &Self::Input) -> Self::Output {
         *Self::sum_elves(&input).iter().max().unwrap()
     }
 
-    fn part_2(input: Self::Input) -> Self::Output {
+    fn part_2(input: &Self::Input) -> Self::Output {
         let mut elves = Self::sum_elves(&input);
         elves.sort_unstable();
         elves[elves.len() - 3..elves.len()].iter().sum()
