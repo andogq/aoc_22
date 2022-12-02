@@ -56,4 +56,3 @@ fn test() {
 
     assert_eq!(Day01::run(input), (24000, 45000));
 }
-
