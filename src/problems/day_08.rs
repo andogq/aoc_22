@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::day::Day;
 
@@ -31,8 +31,8 @@ impl Day for Day08 {
                 visible_trees.insert(first_tree_pos);
 
                 let init = (visible_trees, first_tree, {
-                    let mut reverse_trees = HashMap::new();
-                    reverse_trees.insert(first_tree, vec![first_tree_pos]);
+                    let mut reverse_trees = vec![None; 10];
+                    reverse_trees[first_tree] = Some(first_tree_pos);
                     reverse_trees
                 });
 
@@ -51,18 +51,18 @@ impl Day for Day08 {
                         // Reverse direction
                         (0..=tree).for_each(|smaller_tree| {
                             // Remove all smaller trees
-                            reverse_trees.remove(&smaller_tree);
+                            reverse_trees[smaller_tree] = None;
                         });
 
                         // Add tree
-                        reverse_trees.entry(tree).or_default().push(tree_pos);
+                        reverse_trees[tree] = Some(tree_pos);
 
                         (visible, largest, reverse_trees)
                     },
                 );
 
                 // Combine forward and reverse visible
-                forward_visible.extend(reverse_visible.values().flatten());
+                forward_visible.extend(reverse_visible.into_iter().flatten());
 
                 forward_visible
             })
