@@ -2,48 +2,48 @@ use std::collections::{HashMap, HashSet};
 
 use crate::day::Day;
 
+type BoxedIter<T> = Box<dyn Iterator<Item = T>>;
+
 pub struct Day08;
 impl Day for Day08 {
-    type Input = (Vec<usize>, usize, usize);
+    type Input = Vec<Vec<usize>>;
     type Output = usize;
 
-    fn part_1((input, height, width): Self::Input) -> Self::Output {
-        // Rows
-        let rows: Box<dyn Iterator<Item = Box<dyn Iterator<Item = usize>>>> =
-            Box::new((0..height).map(|row_number| {
-                Box::new(row_number * width..(row_number + 1) * width)
-                    as Box<dyn Iterator<Item = usize>>
-            }));
-        // Cols
-        let cols: Box<dyn Iterator<Item = Box<dyn Iterator<Item = usize>>>> =
-            Box::new((0..width).map(|col_number| {
-                Box::new((col_number..col_number + (height * width)).step_by(width))
-                    as Box<dyn Iterator<Item = usize>>
-            }));
+    fn part_1(input: Self::Input) -> Self::Output {
+        let height = input.len();
+        let width = input.first().unwrap().len();
+
+        let rows: BoxedIter<_> = Box::new((0..height).map(move |row_number| {
+            Box::new((0..width).map(move |x| (x, row_number))) as BoxedIter<(usize, usize)>
+        }));
+        let cols = Box::new((0..width).map(move |col_number| {
+            Box::new((0..height).map(move |y| (col_number, y))) as BoxedIter<_>
+        }));
 
         [rows, cols]
             .into_iter()
             .flatten()
-            .fold(HashSet::new(), |mut visible_trees, mut sequence_indexes| {
-                let first_tree_index = sequence_indexes.next().unwrap();
-                let first_tree = input[first_tree_index];
+            .fold(HashSet::new(), |mut visible_trees, mut sequence| {
+                let first_tree_pos = sequence.next().unwrap();
+                let first_tree = input[first_tree_pos.1][first_tree_pos.0];
 
                 // First tree is on an edge, always visible
-                visible_trees.insert(first_tree_index);
+                visible_trees.insert(first_tree_pos);
 
                 let init = (visible_trees, first_tree, {
                     let mut reverse_trees = HashMap::new();
-                    reverse_trees.insert(first_tree, vec![first_tree_index]);
+                    reverse_trees.insert(first_tree, vec![first_tree_pos]);
                     reverse_trees
                 });
-                let (mut forward_visible, _, reverse_visible) = sequence_indexes.fold(
+
+                let (mut forward_visible, _, reverse_visible) = sequence.fold(
                     init,
-                    |(mut visible, mut largest, mut reverse_trees), tree_index| {
-                        let tree = input[tree_index];
+                    |(mut visible, mut largest, mut reverse_trees), tree_pos| {
+                        let tree = input[tree_pos.1][tree_pos.0];
 
                         // Forward direction
                         if tree > largest {
-                            visible.insert(tree_index);
+                            visible.insert(tree_pos);
 
                             largest = tree;
                         }
@@ -55,7 +55,7 @@ impl Day for Day08 {
                         });
 
                         // Add tree
-                        reverse_trees.entry(tree).or_default().push(tree_index);
+                        reverse_trees.entry(tree).or_default().push(tree_pos);
 
                         (visible, largest, reverse_trees)
                     },
@@ -70,67 +70,63 @@ impl Day for Day08 {
     }
 
     fn part_2(input: Self::Input) -> Self::Output {
-        // let mut largest = 0;
-        //
-        // for y in 0..input.len() {
-        //     for x in 0..input[y].len() {
-        //         let mut score = 1;
-        //         let tree = input[y][x];
-        //
-        //         let mut counter = 0;
-        //         for new_y in (0..y).rev() {
-        //             counter += 1;
-        //             if input[new_y][x] >= tree {
-        //                 break;
-        //             }
-        //         }
-        //         score *= counter;
-        //
-        //         let mut counter = 0;
-        //         for new_y in y + 1..input.len() {
-        //             counter += 1;
-        //             if input[new_y][x] >= tree {
-        //                 break;
-        //             }
-        //         }
-        //         score *= counter;
-        //
-        //         let mut counter = 0;
-        //         for new_x in (0..x).rev() {
-        //             counter += 1;
-        //             if input[y][new_x] >= tree {
-        //                 break;
-        //             }
-        //         }
-        //         score *= counter;
-        //
-        //         let mut counter = 0;
-        //         for new_x in x + 1..input[y].len() {
-        //             counter += 1;
-        //             if input[y][new_x] >= tree {
-        //                 break;
-        //             }
-        //         }
-        //         score *= counter;
-        //
-        //         if score > largest {
-        //             largest = score;
-        //         }
-        //     }
-        // }
-        //
-        // largest
-        0
+        let height = input.len();
+        let width = input.first().unwrap().len();
+
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let tree = input[y][x];
+
+                // Travel in each direction
+                [(0_isize, 1_isize), (1, 0), (0, -1), (-1, 0)]
+                    .into_iter()
+                    .map(|(dx, dy)| {
+                        let mut steps = 0;
+                        let (mut x, mut y) = (x, y);
+
+                        // Ensure bounds are met (don't go negative or larger than array)
+                        while !((x == 0 && dx.is_negative())
+                            || (y == 0 && dy.is_negative())
+                            || (x >= width - 1 && dx.is_positive())
+                            || (y >= height - 1 && dy.is_positive()))
+                        {
+                            // Step to next tree
+                            x = if dx.is_negative() {
+                                x - dx.unsigned_abs()
+                            } else {
+                                x + dx.unsigned_abs()
+                            };
+                            y = if dy.is_negative() {
+                                y - dy.unsigned_abs()
+                            } else {
+                                y + dy.unsigned_abs()
+                            };
+
+                            steps += 1;
+
+                            // Early break out if tree height is too high
+                            if input[y][x] >= tree {
+                                break;
+                            }
+                        }
+
+                        steps
+                    })
+                    .product::<usize>()
+            })
+            .max()
+            .unwrap()
     }
 
     fn parse(raw: &str) -> Self::Input {
-        (
-            raw.lines()
-                .flat_map(|line| line.chars().map(|c| (c as usize) - ('0' as usize)))
-                .collect(),
-            raw.lines().count(),
-            raw.lines().next().unwrap().len(),
-        )
+        raw.lines()
+            .map(|line| {
+                line.chars()
+                    .map(|c| (c as usize) - ('0' as usize))
+                    .collect()
+            })
+            .collect()
     }
 }
 
