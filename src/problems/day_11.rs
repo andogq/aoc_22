@@ -4,6 +4,9 @@ use crate::day::Day;
 
 const WORRY_REDUCE: usize = 3;
 
+type Worry = u64;
+type MonkeyNumber = usize;
+
 #[derive(Clone)]
 pub enum Operation {
     Mult(usize),
@@ -21,18 +24,18 @@ pub struct Monkey {
 }
 
 impl Monkey {
-    pub fn inspect(&mut self, item: &u64) -> u64 {
+    pub fn inspect(&mut self, item: &Worry) -> u64 {
         self.inspected_count += 1;
 
         match self.operation {
             Operation::Square => item.pow(2),
-            Operation::Add(amount) => item + amount as u64,
-            Operation::Mult(amount) => item * amount as u64,
+            Operation::Add(amount) => item + amount as Worry,
+            Operation::Mult(amount) => item * amount as Worry,
         }
     }
 
-    pub fn test(&self, item: u64) -> usize {
-        if item % self.divisor as u64 == 0 {
+    pub fn test(&self, item: Worry) -> usize {
+        if item % self.divisor as Worry == 0 {
             self.next_monkey_true
         } else {
             self.next_monkey_false
@@ -40,73 +43,56 @@ impl Monkey {
     }
 }
 
+fn calculate_monkey_business(
+    monkeys: &mut [Monkey],
+    items: &mut HashMap<MonkeyNumber, Vec<Worry>>,
+    amount: usize,
+    worry_reducer: &dyn Fn(Worry) -> u64,
+) -> usize {
+    for _ in 0..amount {
+        for (i, monkey) in monkeys.iter_mut().enumerate() {
+            // TODO: Need a better way to empty an iterator
+            let monkey_items = items.get_mut(&i).unwrap().drain(0..).collect::<Vec<_>>();
+
+            for item in monkey_items {
+                // Inspect the item
+                let new_item = worry_reducer(monkey.inspect(&item));
+
+                // Test item
+                let next_monkey = monkey.test(new_item);
+
+                // Throw item
+                items.entry(next_monkey).or_default().push(new_item);
+            }
+        }
+    }
+
+    monkeys.sort_unstable_by_key(|monkey| monkey.inspected_count);
+
+    monkeys
+        .iter()
+        .rev()
+        .take(2)
+        .map(|monkey| monkey.inspected_count)
+        .product()
+}
+
 pub struct Day11;
 impl Day for Day11 {
-    type Input = (Vec<Monkey>, HashMap<usize, Vec<u64>>);
+    type Input = (Vec<Monkey>, HashMap<MonkeyNumber, Vec<Worry>>);
     type Output = usize;
 
     fn part_1((mut monkeys, mut items): Self::Input) -> Self::Output {
-        for _ in 0..20 {
-            for (i, monkey) in monkeys.iter_mut().enumerate() {
-                // TODO: Need a better way to empty an iterator
-                let monkey_items = items.get_mut(&i).unwrap().drain(0..).collect::<Vec<_>>();
-
-                for item in monkey_items {
-                    // Inspect the item
-                    let mut new_item = monkey.inspect(&item);
-
-                    // Reduce worry
-                    new_item /= WORRY_REDUCE as u64;
-
-                    // Test item
-                    let next_monkey = monkey.test(new_item);
-
-                    // Throw item
-                    items.entry(next_monkey).or_default().push(new_item);
-                }
-            }
-        }
-
-        monkeys.sort_unstable_by_key(|monkey| monkey.inspected_count);
-
-        monkeys
-            .into_iter()
-            .rev()
-            .take(2)
-            .map(|monkey| monkey.inspected_count)
-            .product()
+        calculate_monkey_business(&mut monkeys, &mut items, 20, &|item| {
+            item / WORRY_REDUCE as Worry
+        })
     }
 
     fn part_2((mut monkeys, mut items): Self::Input) -> Self::Output {
         // Find common divisor
-        let div: u64 = monkeys.iter().map(|m| m.divisor as u64).product();
+        let div: Worry = monkeys.iter().map(|m| m.divisor as u64).product();
 
-        for _ in 0..10000 {
-            for (i, monkey) in monkeys.iter_mut().enumerate() {
-                // TODO: Need a better way to empty an iterator
-                let monkey_items = items.get_mut(&i).unwrap().drain(0..).collect::<Vec<_>>();
-
-                for item in monkey_items {
-                    // Inspect the item
-                    let new_item = monkey.inspect(&item) % div;
-
-                    // Test item
-                    let next_monkey = monkey.test(new_item);
-
-                    // Throw item
-                    items.entry(next_monkey).or_default().push(new_item);
-                }
-            }
-        }
-
-        monkeys.sort_unstable_by_key(|monkey| monkey.inspected_count);
-
-        monkeys
-            .into_iter()
-            .rev()
-            .take(2)
-            .map(|monkey| monkey.inspected_count)
-            .product()
+        calculate_monkey_business(&mut monkeys, &mut items, 10000, &|item| item % div)
     }
 
     fn parse(raw: &str) -> Self::Input {
