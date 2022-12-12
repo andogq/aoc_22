@@ -1,6 +1,8 @@
-use std::{cmp::Ordering, collections::HashSet};
+use std::collections::HashSet;
 
 use crate::day::Day;
+
+type Position = (isize, isize);
 
 #[derive(Clone)]
 pub enum Direction {
@@ -9,6 +11,7 @@ pub enum Direction {
     Left,
     Right,
 }
+
 impl From<char> for Direction {
     fn from(c: char) -> Self {
         match c {
@@ -21,22 +24,77 @@ impl From<char> for Direction {
     }
 }
 
-fn next_position(head: (isize, isize), mut tail: (isize, isize)) -> (isize, isize) {
-    // Update tail position
-    fn find_next(d: isize) -> isize {
-        match d.cmp(&0) {
-            Ordering::Equal => 0,
-            Ordering::Less => -1,
-            Ordering::Greater => 1,
+impl From<&Direction> for (isize, isize) {
+    fn from(direction: &Direction) -> Self {
+        match direction {
+            Direction::Up => (0, 1),
+            Direction::Down => (0, -1),
+            Direction::Left => (-1, 0),
+            Direction::Right => (1, 0),
+        }
+    }
+}
+
+struct Rope {
+    knots: Vec<Position>,
+}
+
+impl Rope {
+    pub fn new(length: usize) -> Self {
+        Rope {
+            knots: vec![(0, 0); length],
         }
     }
 
-    if (tail.0 - head.0).abs() >= 2 || (tail.1 - head.1).abs() >= 2 {
-        tail.0 = tail.0 + find_next(head.0 - tail.0);
-        tail.1 = tail.1 + find_next(head.1 - tail.1);
+    pub fn count_tail_locations(length: usize, directions: &[Direction]) -> usize {
+        let mut rope = Rope::new(length);
+
+        let mut visited = HashSet::new();
+
+        for direction in directions {
+            rope.step(direction);
+
+            visited.insert(rope.tail());
+        }
+
+        visited.len()
     }
 
-    tail
+    pub fn tail(&self) -> Position {
+        self.knots.last().unwrap().to_owned()
+    }
+
+    pub fn step(&mut self, direction: &Direction) {
+        let (dx, dy) = direction.into();
+
+        let mut new_positions = Vec::with_capacity(self.knots.len());
+
+        for (i, knot) in self.knots.iter().enumerate() {
+            let mut knot = knot.to_owned();
+
+            let (dx, dy) = if i == 0 {
+                (dx, dy)
+            } else {
+                let head: Position = new_positions[i - 1];
+
+                let dx = head.0 - knot.0;
+                let dy = head.1 - knot.1;
+
+                if dx.abs() >= 2 || dy.abs() >= 2 {
+                    (dx.signum(), dy.signum())
+                } else {
+                    (0, 0)
+                }
+            };
+
+            knot.0 += dx;
+            knot.1 += dy;
+
+            new_positions.push(knot);
+        }
+
+        self.knots = new_positions;
+    }
 }
 
 pub struct Day09;
@@ -45,64 +103,11 @@ impl Day for Day09 {
     type Output = usize;
 
     fn part_1(input: Self::Input) -> Self::Output {
-        let mut visited = HashSet::new();
-
-        let mut head_position = (0, 0);
-        let mut tail_position = (0, 0);
-
-        for direction in input {
-            let (dx, dy) = match direction {
-                Direction::Up => (0, 1),
-                Direction::Down => (0, -1),
-                Direction::Left => (-1, 0),
-                Direction::Right => (1, 0),
-            };
-
-            // Update head position
-            head_position.0 += dx;
-            head_position.1 += dy;
-
-            // Update tail position
-            tail_position = next_position(head_position, tail_position);
-
-            visited.insert(tail_position);
-        }
-
-        visited.len()
+        Rope::count_tail_locations(2, &input)
     }
 
     fn part_2(input: Self::Input) -> Self::Output {
-        let mut positions = vec![(0, 0); 10];
-        let mut visited = HashSet::new();
-
-        for direction in input {
-            let mut next_positions: Vec<(isize, isize)> = Vec::with_capacity(10);
-
-            for (i, knot) in positions.iter().enumerate() {
-                let mut knot = knot.to_owned();
-
-                if i == 0 {
-                    let (dx, dy) = match direction {
-                        Direction::Up => (0, 1),
-                        Direction::Down => (0, -1),
-                        Direction::Left => (-1, 0),
-                        Direction::Right => (1, 0),
-                    };
-                    knot.0 += dx;
-                    knot.1 += dy;
-                } else {
-                    knot = next_position(next_positions[i - 1].to_owned(), knot.to_owned());
-                }
-
-                next_positions.push(knot);
-            }
-
-            visited.insert(next_positions[9]);
-
-            positions = next_positions;
-        }
-
-        visited.len()
+        Rope::count_tail_locations(10, &input)
     }
 
     fn parse(raw: &str) -> Self::Input {
@@ -138,5 +143,5 @@ R 17
 D 10
 L 25
 U 20";
-    assert_eq!(Day09::run(input), (0, 36));
+    assert_eq!(Day09::run(input), (88, 36));
 }
