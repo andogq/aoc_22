@@ -3,101 +3,151 @@ use std::cmp::Ordering;
 use crate::day::Day;
 
 #[derive(Clone)]
-pub enum PacketPart {
-    Integer(usize),
-    List(Vec<PacketPart>),
+pub struct PacketList {
+    list: Vec<Packet>,
+    divider_packet: bool,
 }
 
-fn parse_packet_part(raw: &[char]) -> Vec<PacketPart> {
-    let mut packet = Vec::new();
+#[derive(Clone)]
+pub enum Packet {
+    Integer(usize),
+    List(PacketList),
+}
 
-    let mut chars = raw[1..].iter();
+impl Eq for Packet {}
 
-    while let Some(c) = chars.next() {
-        match c {
-            '0'..='9' => {
-                let mut n = vec![*c];
-                n.extend(chars.clone().take_while(|c| c.is_ascii_digit()).to_owned());
-
-                packet.push(PacketPart::Integer(
-                    n.iter().collect::<String>().parse().unwrap(),
-                ));
-            }
-            '[' => {
-                // Starting new packet part
-                let mut part_raw = vec![*c];
-                let mut depth = 0;
-
-                loop {
-                    let next_c = *chars.next().unwrap();
-                    part_raw.push(next_c);
-
-                    if next_c == '[' {
-                        depth += 1;
-                    } else if next_c == ']' {
-                        if depth == 0 {
-                            // End of packet part
-                            packet.push(PacketPart::List(parse_packet_part(&part_raw)));
-                            break;
-                        } else {
-                            depth -= 1;
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
+impl Packet {
+    pub fn divider_packet(signal: usize) -> Self {
+        Self::List(PacketList {
+            list: vec![vec![Packet::Integer(signal)].into()],
+            divider_packet: true,
+        })
     }
 
-    packet
+    pub fn as_list(&self) -> Self {
+        match self {
+            Packet::Integer(integer) => vec![Packet::Integer(*integer)].into(),
+            // TODO: not super happy with this clone
+            list => list.clone(),
+        }
+    }
 }
 
-fn compare(left: &PacketPart, right: &PacketPart) -> Ordering {
-    match (left, right) {
-        (PacketPart::Integer(left), PacketPart::Integer(right)) => left.cmp(right),
-        (PacketPart::List(ref left), PacketPart::List(ref right)) => {
-            // Compare items manually
-            let mut left = left.iter();
-            let mut right = right.iter();
-            loop {
-                let l = left.next();
-                let r = right.next();
+impl From<Vec<Packet>> for Packet {
+    fn from(v: Vec<Packet>) -> Self {
+        Self::List(PacketList {
+            list: v,
+            divider_packet: false,
+        })
+    }
+}
 
-                match (l, r) {
-                    (Some(l), Some(r)) => {
-                        // Compare items, and short circuit if out of order
-                        match compare(l, r) {
-                            Ordering::Equal => continue,
-                            o => return o,
+impl From<&str> for Packet {
+    fn from(raw: &str) -> Self {
+        if raw.chars().all(|c| c.is_ascii_digit()) {
+            Self::Integer(raw.parse().unwrap())
+        } else {
+            let mut packet = Vec::new();
+
+            let mut chars = raw.chars();
+
+            // Skip the first open bracket
+            chars.next();
+
+            while let Some(c) = chars.next() {
+                match c {
+                    '0'..='9' => {
+                        let mut n = vec![c];
+                        n.extend(chars.clone().take_while(|c| c.is_ascii_digit()).to_owned());
+
+                        packet.push(Packet::Integer(
+                            n.iter().collect::<String>().parse().unwrap(),
+                        ));
+                    }
+                    '[' => {
+                        // Starting new packet part
+                        let mut part_raw = c.to_string();
+                        let mut depth = 0;
+
+                        loop {
+                            let next_c = chars.next().unwrap();
+                            part_raw.push(next_c);
+
+                            if next_c == '[' {
+                                depth += 1;
+                            } else if next_c == ']' {
+                                if depth == 0 {
+                                    // End of packet part
+                                    packet.push(part_raw.as_str().into());
+                                    break;
+                                } else {
+                                    depth -= 1;
+                                }
+                            }
                         }
                     }
-                    (None, Some(_)) => return Ordering::Less,
-                    (Some(_), None) => return Ordering::Greater,
-                    (None, None) => return Ordering::Equal,
+                    _ => {}
                 }
             }
+
+            packet.into()
         }
-        (PacketPart::Integer(left), PacketPart::List(right)) => compare(
-            &PacketPart::List(vec![PacketPart::Integer(*left)]),
-            &PacketPart::List(right.to_vec()),
-        ),
-        (PacketPart::List(left), PacketPart::Integer(right)) => compare(
-            &PacketPart::List(left.to_vec()),
-            &PacketPart::List(vec![PacketPart::Integer(*right)]),
-        ),
+    }
+}
+
+impl Ord for Packet {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Packet::Integer(left), Packet::Integer(right)) => left.cmp(right),
+            (Packet::List(ref left), Packet::List(ref right)) => {
+                // Compare items manually
+                let mut left = left.list.iter();
+                let mut right = right.list.iter();
+                loop {
+                    let l = left.next();
+                    let r = right.next();
+
+                    match (l, r) {
+                        (Some(l), Some(r)) => {
+                            // Compare items, and short circuit if out of order
+                            match l.cmp(r) {
+                                Ordering::Equal => continue,
+                                o => return o,
+                            }
+                        }
+                        (None, Some(_)) => return Ordering::Less,
+                        (Some(_), None) => return Ordering::Greater,
+                        (None, None) => return Ordering::Equal,
+                    }
+                }
+            }
+            (left, right) => left.as_list().cmp(&right.as_list()),
+        }
+    }
+}
+
+impl PartialEq for Packet {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(self.partial_cmp(other), Some(Ordering::Equal))
+    }
+}
+
+impl PartialOrd for Packet {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 pub struct Day13;
 impl Day for Day13 {
-    type Input = Vec<(PacketPart, PacketPart)>;
+    type Input = Vec<(Packet, Packet)>;
     type Output = usize;
 
     fn part_1(input: Self::Input) -> Self::Output {
         input
             .into_iter()
             .enumerate()
-            .filter(|(_, group)| matches!(compare(&group.0, &group.1), Ordering::Less))
+            .filter(|(_, group)| matches!(group.0.cmp(&group.1), Ordering::Less))
             .map(|(i, _)| i + 1)
             .sum()
     }
@@ -106,51 +156,33 @@ impl Day for Day13 {
         let mut ordered = input
             .into_iter()
             .flat_map(|(left, right)| [left, right])
-            .chain([
-                PacketPart::List(parse_packet_part(
-                    &"[[2]]".chars().to_owned().collect::<Vec<_>>(),
-                )),
-                PacketPart::List(parse_packet_part(
-                    &"[[6]]".chars().to_owned().collect::<Vec<_>>(),
-                )),
-            ])
+            .chain([Packet::divider_packet(2), Packet::divider_packet(6)])
             .collect::<Vec<_>>();
 
-        ordered.sort_unstable_by(compare);
+        ordered.sort_unstable();
 
         ordered
             .into_iter()
             .enumerate()
-            .filter_map(|(i, p)| {
-                if let PacketPart::List(l) = p {
-                    if l.len() == 1 {
-                        if let PacketPart::List(ref j) = l[0] {
-                            if j.len() == 1 {
-                                if let PacketPart::Integer(j) = j[0] {
-                                    if j == 2 || j == 6 {
-                                        return Some(i + 1);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                None
+            .filter(|(_, p)| {
+                matches!(
+                    p,
+                    Packet::List(PacketList {
+                        divider_packet: true,
+                        ..
+                    })
+                )
             })
+            .map(|(i, _)| i + 1)
             .product()
     }
 
     fn parse(raw: &str) -> Self::Input {
         raw.split("\n\n")
             .map(|raw_group| {
-                let mut groups = raw_group.lines().map(|packet| {
-                    parse_packet_part(&packet.chars().to_owned().collect::<Vec<_>>())
-                });
+                let mut groups = raw_group.lines().map(|packet| packet.into());
 
-                (
-                    PacketPart::List(groups.next().unwrap()),
-                    PacketPart::List(groups.next().unwrap()),
-                )
+                (groups.next().unwrap(), groups.next().unwrap())
             })
             .collect()
     }
