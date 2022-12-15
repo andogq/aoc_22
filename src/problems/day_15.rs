@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{cmp::Ordering, collections::HashSet};
 
 use crate::day::Day;
 
@@ -49,44 +49,75 @@ impl Day for Day15 {
 
     fn part_2((_, search_max, sensors): Self::Input) -> Self::Output {
         for search_row in 0isize..=search_max as isize {
-            let row_squares = sensors
-                .iter()
-                .try_fold(None::<HashSet<isize>>, |mut row_squares, sensor| {
+            let free_ranges = sensors.iter().try_fold(
+                vec![0..=search_max as isize],
+                |mut free_ranges, sensor| {
+                    // Create the range for the sensor on this row
+                    let sensor_max_range = sensor.known_distance();
                     let y_spread = sensor.position.1.abs_diff(search_row);
-                    let d = sensor.known_distance();
 
-                    if y_spread <= d {
-                        let x_spread = (d - y_spread) as isize;
+                    if y_spread <= sensor_max_range {
+                        // Sensor can reach this row
+                        let x_spread = (sensor_max_range - y_spread) as isize;
 
-                        let sensor_squares = (0..sensor.position.0 - x_spread)
-                            .chain(sensor.position.0 + x_spread + 1..search_max as isize + 1)
-                            .collect::<HashSet<_>>();
+                        let sensor_range =
+                            sensor.position.0 - x_spread..=sensor.position.0 + x_spread;
 
-                        row_squares = Some(if let Some(row_squares) = row_squares {
-                            if row_squares.is_empty() {
-                                return None;
-                            }
+                        // Insert sensor range into the row range
+                        free_ranges = free_ranges
+                            .into_iter()
+                            .flat_map(|range| {
+                                match (
+                                    range.contains(sensor_range.start()),
+                                    range.contains(sensor_range.end()),
+                                ) {
+                                    (true, false) => {
+                                        vec![*range.start()..=*sensor_range.start() - 1]
+                                    }
+                                    (false, true) => vec![*sensor_range.end() + 1..=*range.end()],
+                                    (true, true) => {
+                                        // Subdivide the range
+                                        vec![
+                                            *range.start()..=*sensor_range.start() - 1,
+                                            *sensor_range.end() + 1..=*range.end(),
+                                        ]
+                                    }
+                                    (false, false) => {
+                                        // Either completely overlapping, or completely not
+                                        match (
+                                            sensor_range.start().cmp(range.start()),
+                                            sensor_range.end().cmp(range.end()),
+                                        ) {
+                                            (
+                                                Ordering::Less | Ordering::Equal,
+                                                Ordering::Greater | Ordering::Equal,
+                                            ) => vec![],
+                                            _ => vec![range],
+                                        }
+                                    }
+                                }
+                            })
+                            .collect();
 
-                            row_squares.intersection(&sensor_squares).cloned().collect()
-                        } else {
-                            sensor_squares
-                        });
+                        if free_ranges.is_empty() {
+                            return None;
+                        }
                     }
 
-                    Some(row_squares)
-                })
-            .map(|s| s.unwrap());
+                    Some(free_ranges)
+                },
+            );
 
-            if let Some(row_squares) = row_squares {
-                match row_squares.len() {
+            if let Some(free_ranges) = free_ranges {
+                match free_ranges.len() {
                     0 => (),
                     1 => {
-                        let x = row_squares.into_iter().next().unwrap();
+                        let x = free_ranges.into_iter().next().unwrap();
 
-                        return (x as usize * MULTIPLIER) + search_row as usize;
+                        return (*x.start() as usize * MULTIPLIER) + search_row as usize;
                     }
                     _ => {
-                        println!("Found row with {} available spaces", row_squares.len());
+                        println!("Found row with {} available spaces", free_ranges.len());
                     }
                 }
             }
