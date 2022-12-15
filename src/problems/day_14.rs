@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::day::Day;
 
@@ -8,207 +8,204 @@ pub enum Block {
     Sand,
 }
 
-const SAND_ORIGIN: (usize, usize) = (500, 0);
+type Position = (usize, usize);
 
-fn print_map(map: &HashMap<(usize, usize), Block>) {
-    let mut origin = map.keys().next().unwrap().to_owned().0;
-    let mut max = origin;
-    let mut output = {
-        let mut v = VecDeque::new();
-        v.push_back(VecDeque::new());
+#[derive(Clone)]
+pub struct Map {
+    map: HashMap<Position, Block>,
+    sand_test: Option<Rc<dyn Fn(Position) -> bool>>,
+    floor: Option<usize>,
 
-        v
-    };
+    y_bound: usize,
+    x_bound: (usize, usize),
+}
 
-    for (k, v) in map {
-        // Resize to the left
-        if k.0 < origin {
-            // Need to shift origin
-            let difference = origin - k.0;
-            for row in output.iter_mut() {
-                for _ in 0..difference {
-                    row.push_front(None);
+impl Map {
+    pub fn drop_sand(&mut self, start: Position) -> Option<Position> {
+        let mut next_pos = start;
+
+        loop {
+            // Test the condition to stop dropping sand
+            if let Some(ref sand_test) = self.sand_test {
+                if sand_test(next_pos) {
+                    return None;
                 }
             }
 
-            origin = k.0;
-        }
-
-        // Resize to the right
-        if k.0 >= max {
-            for row in output.iter_mut() {
-                row.extend((max..k.0).map(|_| None));
+            if let Some(floor) = self.floor {
+                if next_pos.1 == floor {
+                    break;
+                }
             }
 
-            max = k.0;
-        }
+            let (down, left, right) = {
+                let mut nodes = [0, -1, 1]
+                    .into_iter()
+                    .map(|dx| (next_pos.0.checked_add_signed(dx).unwrap(), next_pos.1 + 1))
+                    .map(|pos| (self.map.get(&pos), pos));
 
-        // Add required rows
-        while k.1 >= output.len() {
-            output.push_back(VecDeque::from_iter((0..=output[0].len()).map(|_| None)));
-        }
+                (
+                    nodes.next().unwrap(),
+                    nodes.next().unwrap(),
+                    nodes.next().unwrap(),
+                )
+            };
 
-        output[k.1][k.0 - origin] = Some(v);
-    }
-
-    for row in output {
-        for c in row {
-            print!(
-                "{}",
-                match c {
-                    None => ' ',
-                    Some(Block::Rock) => '█',
-                    Some(Block::Sand) => '●',
+            next_pos = match (down.0, left.0, right.0) {
+                (None, _, _) => down.1,
+                (Some(_), None, _) => left.1,
+                (Some(_), Some(_), None) => right.1,
+                (Some(_), Some(_), Some(_)) => {
+                    // Come to rest
+                    break;
                 }
-            );
+            }
         }
 
-        println!();
+        // Insert sand position
+        self.map.insert(next_pos, Block::Sand);
+
+        // Update bounds
+        self.y_bound = self.y_bound.max(next_pos.1);
+        self.x_bound.0 = self.x_bound.0.min(next_pos.0);
+        self.x_bound.1 = self.x_bound.1.max(next_pos.0);
+
+        Some(next_pos)
     }
 }
 
+impl From<&str> for Map {
+    fn from(raw: &str) -> Self {
+        let (map, y_bound, x_bound) = raw
+            .lines()
+            .flat_map(|rock| {
+                rock.to_owned()
+                    .split(" -> ")
+                    .map(|point| {
+                        let (x, y) = point.split_once(',').unwrap();
+                        (x.parse::<usize>().unwrap(), y.parse::<usize>().unwrap())
+                    })
+                    .collect::<Vec<_>>()[..]
+                    .windows(2)
+                    .flat_map(|points| {
+                        let start = points[0];
+                        let end = points[1];
+
+                        if start.0 == end.0 {
+                            let (low, high) = if start.1 > end.1 {
+                                (end.1, start.1)
+                            } else {
+                                (start.1, end.1)
+                            };
+                            (low..=high).map(|y| (start.0, y)).collect::<Vec<_>>()
+                        } else {
+                            let (low, high) = if start.0 > end.0 {
+                                (end.0, start.0)
+                            } else {
+                                (start.0, end.0)
+                            };
+                            (low..=high).map(|x| (x, start.1)).collect::<Vec<_>>()
+                        }
+                    })
+                    // TODO: Don't like that this has to be allocated, but &str references are
+                    // causing problems
+                    .collect::<Vec<_>>()
+            })
+            .fold(
+                (HashMap::new(), 0, None::<(usize, usize)>),
+                |(mut map, y_bound, x_bound), point: Position| {
+                    map.insert(point, Block::Rock);
+
+                    (
+                        map,
+                        y_bound.max(point.1),
+                        if let Some(x_bound) = x_bound {
+                            Some((x_bound.0.min(point.0), x_bound.1.max(point.0)))
+                        } else {
+                            Some(point)
+                        },
+                    )
+                },
+            );
+
+        Self {
+            map,
+            sand_test: None,
+            floor: None,
+
+            x_bound: x_bound.unwrap(),
+            y_bound,
+        }
+    }
+}
+
+impl Display for Map {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = self
+            .map
+            .iter()
+            .fold(
+                vec![vec![' '; self.x_bound.1 - self.x_bound.0 + 1]; self.y_bound + 1],
+                |mut output, (pos, c)| {
+                    output[pos.1][pos.0 - self.x_bound.0] = match c {
+                        Block::Rock => '█',
+                        Block::Sand => '●',
+                    };
+
+                    output
+                },
+            )
+            .into_iter()
+            .map(|row| row.into_iter().collect())
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        write!(f, "{output}")
+    }
+}
+
+const SAND_ORIGIN: (usize, usize) = (500, 0);
+
 pub struct Day14;
 impl Day for Day14 {
-    type Input = HashMap<(usize, usize), Block>;
+    type Input = Map;
     type Output = usize;
 
     fn part_1(mut map: Self::Input) -> Self::Output {
-        let abyss = map.keys().max_by_key(|k| k.1).unwrap().1;
+        map.sand_test = Some(Rc::new(move |pos| pos.1 >= map.y_bound));
+
         let mut sand_counter = 0;
-
-        let mut drop_sand = || -> bool {
-            let mut next_pos = SAND_ORIGIN;
-
-            loop {
-                if next_pos.1 >= abyss {
-                    return false;
-                }
-
-                let (down, left, right) = {
-                    let mut nodes = [0, -1, 1]
-                        .into_iter()
-                        .map(|dx| (next_pos.0.checked_add_signed(dx).unwrap(), next_pos.1 + 1))
-                        .map(|pos| (map.get(&pos), pos));
-
-                    (
-                        nodes.next().unwrap(),
-                        nodes.next().unwrap(),
-                        nodes.next().unwrap(),
-                    )
-                };
-
-                next_pos = match (down.0, left.0, right.0) {
-                    (None, _, _) => down.1,
-                    (Some(_), None, _) => left.1,
-                    (Some(_), Some(_), None) => right.1,
-                    (Some(_), Some(_), Some(_)) => {
-                        // Come to rest
-                        break;
-                    }
-                }
+        loop {
+            if map.drop_sand(SAND_ORIGIN).is_none() {
+                break;
+            } else {
+                sand_counter += 1;
             }
-
-            // Insert sand position
-            map.insert(next_pos, Block::Sand);
-            sand_counter += 1;
-
-            true
-        };
-
-        // wtf lol
-        while drop_sand() {}
+        }
 
         sand_counter
     }
 
     fn part_2(mut map: Self::Input) -> Self::Output {
-        let floor = map.keys().max_by_key(|k| k.1).unwrap().1 + 1;
+        map.floor = Some(map.y_bound + 1);
 
         let mut sand_counter = 0;
-
-        let mut drop_sand = || -> bool {
-            let mut next_pos = SAND_ORIGIN;
-
-            loop {
-                if next_pos.1 == floor {
-                    // Hit the floor
-                    break;
-                }
-
-                let (down, left, right) = {
-                    let mut nodes = [0, -1, 1]
-                        .into_iter()
-                        .map(|dx| (next_pos.0.checked_add_signed(dx).unwrap(), next_pos.1 + 1))
-                        .map(|pos| (map.get(&pos), pos));
-
-                    (
-                        nodes.next().unwrap(),
-                        nodes.next().unwrap(),
-                        nodes.next().unwrap(),
-                    )
-                };
-
-                next_pos = match (down.0, left.0, right.0) {
-                    (None, _, _) => down.1,
-                    (Some(_), None, _) => left.1,
-                    (Some(_), Some(_), None) => right.1,
-                    (Some(_), Some(_), Some(_)) => {
-                        // Come to rest
-                        break;
-                    }
-                }
-            }
-
-            // Insert sand position
-            map.insert(next_pos, Block::Sand);
+        loop {
+            let dropped = map.drop_sand(SAND_ORIGIN);
             sand_counter += 1;
 
-            next_pos != SAND_ORIGIN
-        };
+            if let Some(SAND_ORIGIN) = dropped {
+                break;
+            }
+        }
 
-        // wtf lol
-        while drop_sand() {}
-
-        print_map(&map);
+        println!("{map}");
 
         sand_counter
     }
 
     fn parse(raw: &str) -> Self::Input {
-        raw.lines().fold(HashMap::new(), |mut map, rock| {
-            rock.split(" -> ")
-                .map(|point| {
-                    let (x, y) = point.split_once(',').unwrap();
-                    (x.parse::<usize>().unwrap(), y.parse::<usize>().unwrap())
-                })
-                .collect::<Vec<_>>()[..]
-                .windows(2)
-                .flat_map(|points| {
-                    let start = points[0];
-                    let end = points[1];
-
-                    if start.0 == end.0 {
-                        let (low, high) = if start.1 > end.1 {
-                            (end.1, start.1)
-                        } else {
-                            (start.1, end.1)
-                        };
-                        (low..=high).map(|y| (start.0, y)).collect::<Vec<_>>()
-                    } else {
-                        let (low, high) = if start.0 > end.0 {
-                            (end.0, start.0)
-                        } else {
-                            (start.0, end.0)
-                        };
-                        (low..=high).map(|x| (x, start.1)).collect::<Vec<_>>()
-                    }
-                })
-                .for_each(|pos| {
-                    map.insert(pos, Block::Rock);
-                });
-
-            map
-        })
+        raw.into()
     }
 }
 
