@@ -252,6 +252,8 @@ impl Day for Day16 {
     type Output = usize;
 
     fn part_1(input: Self::Input) -> Self::Output {
+        return 0;
+
         let start = input
             .valves
             .iter()
@@ -264,6 +266,8 @@ impl Day for Day16 {
     }
 
     fn part_2(input: Self::Input) -> Self::Output {
+        return 0;
+
         let start = input
             .valves
             .iter()
