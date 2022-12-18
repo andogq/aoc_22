@@ -1,18 +1,14 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    mem,
-};
+use std::{collections::HashSet, ops::Deref};
 use tqdm::tqdm;
 
 use crate::day::Day;
-
-type Position = (usize, usize);
 
 const NUM_ROCKS_1: usize = 2022;
 const NUM_ROCKS_2: usize = 1000000000000;
 const WIDTH: usize = 7;
 const Y_BUFFER: usize = 3;
 const STARTING_X_OFFSET: usize = 2;
+const ROCK_SIZE: usize = 4;
 const ROCKS: &str = "####
 
 .#.
@@ -42,8 +38,7 @@ impl From<char> for Direction {
         match c {
             '>' => Direction::Right,
             '<' => Direction::Left,
-            c => {
-                dbg!(c);
+            _ => {
                 unreachable!()
             }
         }
@@ -52,7 +47,7 @@ impl From<char> for Direction {
 
 #[derive(Clone, Debug)]
 pub struct Rock {
-    points: Vec<Position>,
+    points: [[bool; ROCK_SIZE]; ROCK_SIZE],
     height: usize,
     width: usize,
 }
@@ -65,23 +60,29 @@ impl Rock {
         let points = raw
             .lines()
             .rev()
+            .chain((raw.lines().count()..ROCK_SIZE).map(|_| ""))
             .enumerate()
-            .flat_map(|(y, row)| {
-                row.chars().enumerate().filter_map(
-                    move |(x, c)| {
+            .map(|(y, row)| {
+                row.chars()
+                    .chain((row.chars().count()..ROCK_SIZE).map(|_| '.'))
+                    .enumerate()
+                    .map(|(x, c)| {
                         if c == '#' {
-                            Some((x, y))
+                            width = width.max(x + 1);
+                            height = height.max(y + 1);
+
+                            true
                         } else {
-                            None
+                            false
                         }
-                    },
-                )
+                    })
+                    .collect::<Vec<bool>>()
+                    .try_into()
+                    .unwrap()
             })
-            .inspect(|&(x, y)| {
-                width = width.max(x + 1);
-                height = height.max(y + 1);
-            })
-            .collect();
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
 
         Self {
             points,
@@ -91,24 +92,34 @@ impl Rock {
     }
 }
 
-fn world_to_hashset(world: &VecDeque<[bool; WIDTH]>) -> HashSet<(usize, usize)> {
+impl Deref for Rock {
+    type Target = [[bool; ROCK_SIZE]; ROCK_SIZE];
+
+    fn deref(&self) -> &Self::Target {
+        &self.points
+    }
+}
+
+fn world_to_hashset(world: &[Row]) -> HashSet<(usize, usize)> {
     world
         .iter()
         .enumerate()
         .flat_map(|(y, row)| {
-            row.iter()
+            row.as_parts()
+                .into_iter()
                 .enumerate()
-                .filter_map(move |(x, &c)| if c { Some((x, y)) } else { None })
+                .filter_map(move |(x, c)| if c { Some((x, y)) } else { None })
         })
         .collect()
 }
 
-fn print_tower(world: &VecDeque<[bool; WIDTH]>) {
+fn print_tower(world: &[Row]) {
     world.iter().enumerate().rev().for_each(|(y, row)| {
         println!(
             "{y:>2} | {}",
-            row.iter()
-                .map(|&c| if c { "#" } else { " " })
+            row.as_parts()
+                .into_iter()
+                .map(|c| if c { "#" } else { " " })
                 .collect::<Vec<_>>()
                 .join(" ")
         );
@@ -136,28 +147,49 @@ impl From<&Vec<Vec<bool>>> for TowerBitMask {
     }
 }
 
+#[derive(Clone)]
+pub struct Row(u8);
+impl Row {
+    pub fn new() -> Self {
+        Row(0)
+    }
+
+    pub fn set(&mut self, i: usize) {
+        self.0 |= 1 << i as u8;
+    }
+
+    pub fn overlap(&self, points: &[usize]) -> bool {
+        points.iter().any(|&i| (self.0 >> i as u8) & 1 == 1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn as_parts(&self) -> [bool; WIDTH] {
+        (0..WIDTH).into_iter().fold([false; WIDTH], |mut arr, i| {
+            arr[i] = (self.0 >> i) & 1 == 1;
+
+            arr
+        })
+    }
+}
+
 fn simulate(rocks: Vec<Rock>, jets: Vec<Direction>, num_rocks: usize) -> usize {
     let largest_rock = rocks.iter().map(|r| r.height.max(r.width)).max().unwrap();
     let mut rocks = rocks.into_iter().cycle();
     let mut jets = jets.into_iter().cycle();
 
-    let mut tower: VecDeque<[bool; WIDTH]> =
-        vec![[false; WIDTH]; Y_BUFFER.max(largest_rock) + largest_rock].into();
-    let mut tower_height = 0;
+    let mut tower: Vec<Row> = vec![Row::new(); Y_BUFFER + ROCK_SIZE];
 
     for _ in tqdm(0..num_rocks) {
         // Create next rock
         let rock = rocks.next().unwrap();
 
         // Clear until top 3 rows are free
-        while tower[tower.len() - Y_BUFFER.max(largest_rock)]
-            .iter()
-            .any(|&c| c)
-        {
+        while !tower[tower.len() - Y_BUFFER.max(largest_rock)].is_empty() {
             // tower.pop_front();
-            tower.push_back([false; WIDTH]);
-
-            tower_height += 1;
+            tower.push(Row::new());
         }
 
         // Find the correct place to drop from
@@ -166,7 +198,7 @@ fn simulate(rocks: Vec<Rock>, jets: Vec<Direction>, num_rocks: usize) -> usize {
             .enumerate()
             .rev() // start with top of tower
             .skip(Y_BUFFER.max(largest_rock))
-            .find(|(_, row)| row.iter().any(|&c| c))
+            .find(|(_, row)| !row.is_empty())
             .map(|(y, _)| y + 1)
             .unwrap_or(0);
 
@@ -185,12 +217,10 @@ fn simulate(rocks: Vec<Rock>, jets: Vec<Direction>, num_rocks: usize) -> usize {
             tower_top,
         );
 
-        let hashset_world = world_to_hashset(&tower);
-
         loop {
             let jet = jets.next().unwrap();
 
-            let horizontal_no_collision = match jet {
+            let horizontal_collision = match jet {
                 Direction::Left => {
                     if position.0 > 0 {
                         Some(-1)
@@ -207,54 +237,61 @@ fn simulate(rocks: Vec<Rock>, jets: Vec<Direction>, num_rocks: usize) -> usize {
                 }
             }
             .map(|dx: isize| {
-                let moved_rock: HashSet<Position> = rock
-                    .points
-                    .iter()
-                    .map(|&(x, y)| {
-                        (
-                            (x + position.0).checked_add_signed(dx).unwrap(),
-                            y + position.1,
-                        )
-                    })
-                    .collect();
+                // TODO: Check with wall
+                let rock_x = position.0.saturating_add_signed(dx).min(7);
 
-                moved_rock.intersection(&hashset_world).count() == 0
+                // Check if new direction will collide with another rock
+                rock.iter().enumerate().any(|(y, row)| {
+                    let world_y = position.1 + y;
+
+                    if world_y < tower.len() {
+                        let row = row
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, &c)| c)
+                            .map(|(x, _)| x + rock_x)
+                            .collect::<Vec<_>>();
+
+                        tower[position.1 + y].overlap(&row)
+                    } else {
+                        // Row is above world, so won't collide
+                        false
+                    }
+                })
             })
-            .unwrap_or(false);
+            .unwrap_or(true);
 
-            if horizontal_no_collision {
+            if !horizontal_collision {
                 // Can move
                 position.0 = match jet {
                     Direction::Left => position.0 - 1,
                     Direction::Right => position.0 + 1,
                 };
-            } else {
-                // No movement L/R
             }
 
             // Check for collision below
-            let moved_rock: HashSet<Position> = rock
-                .points
-                .iter()
-                // TODO: This is really bad, should have a better way to check if it's at the
-                // bottom
-                .map(|&(x, y)| (x + position.0, (y + position.1).saturating_sub(1)))
-                .collect();
+            let vertical_collision = position.1 == 0
+                || rock.iter().enumerate().any(|(y, row)| {
+                    let row = row
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, &c)| c)
+                        .map(|(x, _)| x + position.0)
+                        .collect::<Vec<_>>();
 
-            let blocked = position.1 == 0 || (moved_rock.intersection(&hashset_world).count() > 0);
+                    tower[(position.1 - 1 + y)].overlap(&row)
+                });
 
-            if !blocked {
+            if !vertical_collision {
                 position.1 -= 1;
             } else {
                 // Land the rock
-                let moved_rock: HashSet<Position> = rock
-                    .points
-                    .iter()
-                    .map(|&(x, y)| (x + position.0, y + position.1))
-                    .collect();
+                for (y, row) in rock[0..rock.height].iter().enumerate() {
+                    let tower_row = &mut tower[position.1 + y];
 
-                for pos in moved_rock {
-                    tower[pos.1][pos.0] = true;
+                    for x in row.iter().enumerate().filter(|(_, &c)| c).map(|(x, _)| x) {
+                        tower_row.set(position.0 + x);
+                    }
                 }
 
                 break;
@@ -262,7 +299,9 @@ fn simulate(rocks: Vec<Rock>, jets: Vec<Direction>, num_rocks: usize) -> usize {
         }
     }
 
-    tower.into_iter().filter(|r| r.iter().any(|&c| c)).count()
+    print_tower(&tower);
+
+    tower.into_iter().filter(|r| !r.is_empty()).count()
 }
 
 pub struct Day17;
@@ -275,151 +314,7 @@ impl Day for Day17 {
     }
 
     fn part_2((rocks, jets): Self::Input) -> Self::Output {
-        // simulate(rocks, jets, NUM_ROCKS_2)
         0
-        // let mut rocks = rocks.into_iter().enumerate().cycle();
-        // let mut jets = jets.into_iter().enumerate().cycle();
-        //
-        // let mut tower: Vec<Vec<bool>> = VecDeque::new();
-        //
-        // let mut cache: HashSet<(TowerBitMask, usize, usize)> = HashSet::new();
-        //
-        // for _ in tqdm(0..NUM_ROCKS_2) {
-        //     // Create next rock
-        //     let (rock_i, rock) = rocks.next().unwrap();
-        //
-        //     let world_top = tower
-        //         .iter()
-        //         .enumerate()
-        //         .rev()
-        //         .find(|(_, row)| row.iter().any(|&c| c))
-        //         .map(|(y, _)| y + 1)
-        //         .unwrap_or(0);
-        //
-        //     // Add in rows so there's always 3 empty ones
-        //     while (tower.len() - world_top) <= 3 {
-        //         tower.push_back(vec![false; 7]);
-        //     }
-        //
-        //     let mut position = STARTING_POSITION;
-        //     position.1 = tower.len() - 1;
-        //
-        //     let hashset_world = world_to_hashset(&tower);
-        //
-        //     loop {
-        //         let (jet_i, jet) = jets.next().unwrap();
-        //
-        //         let new = cache.insert((
-        //             TowerBitMask::from(
-        //                 &tower
-        //                     .iter()
-        //                     .rev()
-        //                     .skip_while(|r| r.iter().all(|c| !c))
-        //                     .take(4)
-        //                     .cloned()
-        //                     .collect(),
-        //             ),
-        //             rock_i,
-        //             jet_i,
-        //         ));
-        //         if !new {
-        //             println!("cache hit");
-        //
-        //             dbg!((
-        //                 &tower
-        //                     .iter()
-        //                     .rev()
-        //                     .skip_while(|r| r.iter().all(|c| !c))
-        //                     .take(4)
-        //                     .cloned()
-        //                     .collect::<Vec<_>>(),
-        //                 rock_i,
-        //                 jet_i
-        //             ));
-        //         }
-        //
-        //         let horizontal_no_collision = match jet {
-        //             Direction::Left => {
-        //                 if position.0 > 0 {
-        //                     Some(-1)
-        //                 } else {
-        //                     None
-        //                 }
-        //             }
-        //             Direction::Right => {
-        //                 if position.0 + rock.width < WIDTH {
-        //                     Some(1)
-        //                 } else {
-        //                     None
-        //                 }
-        //             }
-        //         }
-        //         .map(|dx: isize| {
-        //             let moved_rock: HashSet<Position> = rock
-        //                 .points
-        //                 .iter()
-        //                 .map(|&(x, y)| {
-        //                     (
-        //                         (x + position.0).checked_add_signed(dx).unwrap(),
-        //                         y + position.1,
-        //                     )
-        //                 })
-        //                 .collect();
-        //
-        //             moved_rock.intersection(&hashset_world).count() == 0
-        //         })
-        //         .unwrap_or(false);
-        //
-        //         if horizontal_no_collision {
-        //             // Can move
-        //             position.0 = match jet {
-        //                 Direction::Left => position.0 - 1,
-        //                 Direction::Right => position.0 + 1,
-        //             };
-        //         } else {
-        //             // No movement L/R
-        //         }
-        //
-        //         // Check for collision below
-        //         let moved_rock: HashSet<Position> = rock
-        //             .points
-        //             .iter()
-        //             // TODO: This is really bad, should have a better way to check if it's at the
-        //             // bottom
-        //             .map(|&(x, y)| (x + position.0, (y + position.1).saturating_sub(1)))
-        //             .collect();
-        //
-        //         let blocked =
-        //             position.1 == 0 || (moved_rock.intersection(&hashset_world).count() > 0);
-        //
-        //         if !blocked {
-        //             position.1 -= 1;
-        //         } else {
-        //             // Land the rock
-        //             let moved_rock: HashSet<Position> = rock
-        //                 .points
-        //                 .iter()
-        //                 .map(|&(x, y)| (x + position.0, y + position.1))
-        //                 .collect();
-        //
-        //             // Increase world size as requried
-        //             tower.extend(
-        //                 (tower.len()..=rock.height.saturating_sub(position.1))
-        //                     .map(|_| vec![false; 7]),
-        //             );
-        //
-        //             for pos in moved_rock {
-        //                 tower[pos.1][pos.0] = true;
-        //             }
-        //
-        //             break;
-        //         }
-        //     }
-        // }
-        //
-        // print_world(&tower);
-        //
-        // tower.into_iter().filter(|r| r.iter().any(|&c| c)).count()
     }
 
     fn parse(raw: &str) -> Self::Input {
