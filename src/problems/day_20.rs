@@ -1,7 +1,51 @@
 use crate::day::Day;
 
-pub struct Day20;
+pub fn wrapping_add(n: usize, d: isize, max: usize) -> usize {
+    ((max + n) as isize + (d % max as isize)) as usize % max
+}
 
+fn mix(original: &[isize], decryption_key: usize, amount: usize) -> isize {
+    let mut message = original
+        .iter()
+        .map(|&n| n * decryption_key as isize)
+        .enumerate()
+        .collect::<Vec<_>>();
+
+    for _ in 0..amount {
+        for (id, offset) in original
+            .iter()
+            .map(|&n| n * decryption_key as isize)
+            .enumerate()
+        {
+            let current_index = message
+                .iter()
+                .enumerate()
+                .find(|&(_, (original_id, _))| *original_id == id)
+                .map(|(i, _)| i)
+                .unwrap();
+            let new_index = wrapping_add(current_index, offset, message.len() - 1);
+
+            let item = message.remove(current_index);
+            message.insert(new_index, item);
+        }
+    }
+
+    let message = message.into_iter().map(|(_, n)| n).collect::<Vec<_>>();
+
+    // Find the index of 0
+    let zero_index = message
+        .iter()
+        .enumerate()
+        .find(|(_, &n)| n == 0)
+        .map(|(i, _)| i)
+        .unwrap();
+
+    (1..=3)
+        .map(|n| message[wrapping_add(zero_index, n * 1000, message.len())])
+        .sum()
+}
+
+pub struct Day20;
 impl Day for Day20 {
     type Input = Vec<isize>;
     type Output = isize;
@@ -34,8 +78,6 @@ impl Day for Day20 {
             }
 
             input.insert(new_index, (true, offset));
-
-            // dbg!(offset, next_i, new_index, &input);
         }
 
         let base_i = input
@@ -47,14 +89,11 @@ impl Day for Day20 {
 
         (1..=3)
             .map(|n| input[(base_i + (n * 1000)) % input.len()].1)
-            .inspect(|n| {
-                // dbg!(n);
-            })
             .sum()
     }
 
     fn part_2(input: Self::Input) -> Self::Output {
-        0
+        mix(&input, 811589153, 10)
     }
 
     fn parse(raw: &str) -> Self::Input {
@@ -72,5 +111,5 @@ fn test() {
 0
 4
 ";
-    assert_eq!(Day20::run(input), (3, 0));
+    assert_eq!(Day20::run(input), (3, 1623178306));
 }
